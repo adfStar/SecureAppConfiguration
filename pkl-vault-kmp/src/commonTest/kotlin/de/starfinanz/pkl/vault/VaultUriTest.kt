@@ -22,6 +22,42 @@ class VaultUriTest {
         assertEquals("secret", uri.mount)
         assertEquals("myapp/db", uri.path)
         assertNull(uri.field)
+        assertNull(uri.version)
+    }
+
+    @Test
+    fun parses_version_query() {
+        val uri = VaultUri.parse("vault:secret/data/myapp/db?version=3#password")
+        assertEquals("myapp/db", uri.path)
+        assertEquals("password", uri.field)
+        assertEquals(3, uri.version)
+    }
+
+    @Test
+    fun parses_version_query_without_field() {
+        val uri = VaultUri.parse("vault:secret/data/myapp/db?version=7")
+        assertEquals(7, uri.version)
+        assertNull(uri.field)
+    }
+
+    @Test
+    fun rejects_non_numeric_version() {
+        assertFailsWith<VaultUriException> { VaultUri.parse("vault:secret/data/app?version=latest#x") }
+    }
+
+    @Test
+    fun rejects_non_positive_version() {
+        assertFailsWith<VaultUriException> { VaultUri.parse("vault:secret/data/app?version=0#x") }
+    }
+
+    @Test
+    fun rejects_unknown_query_param() {
+        assertFailsWith<VaultUriException> { VaultUri.parse("vault:secret/data/app?ver=3#x") }
+    }
+
+    @Test
+    fun rejects_empty_query() {
+        assertFailsWith<VaultUriException> { VaultUri.parse("vault:secret/data/app?#x") }
     }
 
     @Test

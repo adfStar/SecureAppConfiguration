@@ -32,29 +32,61 @@ public data class VaultEnv(
 }
 
 /**
- * Reads [VaultEnv] from process environment variables.
- *
- * Fail-closed: returns a typed [VaultConfigException] (via [resolveVaultEnv])
- * rather than silently degrading when required variables are absent.
+ * Reads a process environment variable, or `null` if unset.
  */
 internal expect fun readEnvVar(name: String): String?
 
 /**
+ * Reads the Vault CLI token-helper file (`~/.vault-token`), or `null` if it is
+ * absent or empty. This is the token cached by `vault login`, letting local
+ * builds authenticate without an explicit `VAULT_TOKEN`.
+ */
+internal expect fun readTokenHelperFile(): String?
+
+/** Default path shown in diagnostics for the token-helper fallback. */
+internal const val TOKEN_HELPER_PATH: String = "~/.vault-token"
+
+/**
  * Resolve [VaultEnv] from the environment, failing closed with a clear,
- * secret-free message when `VAULT_ADDR` or `VAULT_TOKEN` is missing.
+ * secret-free message when configuration is incomplete.
+ *
+ * Token precedence: `VAULT_TOKEN` (mandatory for CI; env always wins), then the
+ * `~/.vault-token` helper file written by `vault login` (local builds), then
+ * fail-closed.
  */
 public fun resolveVaultEnv(): VaultEnv {
     val address = readEnvVar(VaultEnv.ADDRESS_VAR)
-    val token = readEnvVar(VaultEnv.TOKEN_VAR)
+    val envToken = readEnvVar(VaultEnv.TOKEN_VAR)
+    val helperToken = readTokenHelperFile()
     val namespace = readEnvVar(VaultEnv.NAMESPACE_VAR)?.takeIf { it.isNotBlank() }
+    return buildVaultEnv(address, envToken, helperToken, namespace)
+}
 
-    if (address.isNullOrBlank() || token.isNullOrBlank()) {
-        val missing = buildList {
-            if (address.isNullOrBlank()) add(VaultEnv.ADDRESS_VAR)
-            if (token.isNullOrBlank()) add(VaultEnv.TOKEN_VAR)
+/**
+ * Pure assembly of [VaultEnv] from already-read sources, so the fail-closed and
+ * precedence logic is testable without touching the real environment.
+ */
+internal fun buildVaultEnv(
+    address: String?,
+    envToken: String?,
+    helperToken: String?,
+    namespace: String?,
+): VaultEnv {
+    val token = envToken?.takeIf { it.isNotBlank() }
+        ?: helperToken?.takeIf { it.isNotBlank() }
+
+    if (address.isNullOrBlank() || token == null) {
+        val problems = buildList {
+            if (address.isNullOrBlank()) add("missing ${VaultEnv.ADDRESS_VAR}")
+            if (token == null) {
+                add(
+                    "no token: set ${VaultEnv.TOKEN_VAR} or run `vault login` " +
+                        "to populate $TOKEN_HELPER_PATH",
+                )
+            }
         }
         throw VaultConfigException(
-            "Vault environment is not configured: missing ${missing.joinToString(", ")}",
+            "Vault environment is not configured: ${problems.joinToString("; ")}",
         )
     }
     return VaultEnv(address = address, token = token, namespace = namespace)

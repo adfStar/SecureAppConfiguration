@@ -59,6 +59,28 @@ class VaultClientTest {
     }
 
     @Test
+    fun appends_version_query_when_pinned() = runTest {
+        var seenQuery: String? = null
+        val http = client { request ->
+            seenQuery = request.url.encodedQuery
+            respond(KV_V2_BODY, HttpStatusCode.OK)
+        }
+        VaultClient(http, env).read(VaultUri.parse("vault:secret/data/myapp/db?version=3#password"))
+        assertEquals("version=3", seenQuery)
+    }
+
+    @Test
+    fun omits_version_query_when_unpinned() = runTest {
+        var seenQuery: String? = "unset"
+        val http = client { request ->
+            seenQuery = request.url.encodedQuery
+            respond(KV_V2_BODY, HttpStatusCode.OK)
+        }
+        VaultClient(http, env).read(VaultUri.parse("vault:secret/data/myapp/db#password"))
+        assertEquals("", seenQuery)
+    }
+
+    @Test
     fun forbidden_maps_to_auth_exception() = runTest {
         val http = client { respond("denied", HttpStatusCode.Forbidden) }
         assertFailsWith<VaultAuthException> {

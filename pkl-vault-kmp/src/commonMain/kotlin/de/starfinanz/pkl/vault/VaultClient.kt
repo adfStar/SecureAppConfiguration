@@ -57,7 +57,8 @@ public class VaultClient(
      * auth failure, missing path, unexpected response, or network error.
      */
     public suspend fun read(uri: VaultUri): VaultSecret {
-        val url = "$baseUrl/v1/${uri.apiPath()}"
+        val versionQuery = uri.version?.let { "?version=$it" } ?: ""
+        val url = "$baseUrl/v1/${uri.apiPath()}$versionQuery"
         val response = try {
             http.get(url) {
                 header("X-Vault-Token", env.token)
