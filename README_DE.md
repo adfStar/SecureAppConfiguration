@@ -229,24 +229,46 @@ vault kv get -mount=secret myapp/db          # prüft Pfad + Policy
    Secrets; deine App kompiliert es ein. **Promon** verschlüsselt das Bundle
    nach dem Build.
 
-### iOS (Swift, SPM / Xcode)
+### iOS (Swift, SwiftPM / Xcode)
 
-1. Füge das Pkl-Swift-Package und das SPM-Build-Plugin hinzu, das Swift aus
-   deinen Pkl-Modulen generiert.
-2. Registriere den Swift-Adapter auf dem für die Codegenerierung genutzten
+1. Baue das Kotlin/Native-XCFramework (die CI erledigt das auf einem
+   macOS-Agenten):
+
+   ```bash
+   ./gradlew :pkl-vault-kmp:assemblePklVaultReleaseXCFramework
+   # → pkl-vault-kmp/build/XCFrameworks/release/PklVault.xcframework
+   ```
+
+2. Binde das Swift-Adapter-Package `swift-adapter/Package.swift` ein. Es
+   deklariert ein Binary-Target, das auf `PklVault.xcframework` zeigt, und hängt
+   von [`pkl-swift`](https://github.com/apple/pkl-swift) `0.10.0` ab:
+
+   ```swift
+   // In der Package.swift deiner App
+   dependencies: [
+     .package(path: "../pkl-vault/pkl-vault-kmp/swift-adapter"),
+   ]
+   ```
+
+3. Registriere den Swift-Adapter auf dem für die Codegenerierung genutzten
    Evaluator:
 
    ```swift
-   import PklVault   // dünner Swift-Shim über dem gemeinsamen Kotlin/Native-Framework
+   import PklVaultSwift   // dünner Swift-Shim über dem gemeinsamen Kotlin/Native-Framework
 
    let evaluator = try EvaluatorManager().newEvaluator(
      options: .preconfigured.withResourceReader(VaultResourceReader())
    )
    ```
 
-3. Mache `VAULT_ADDR` + `VAULT_TOKEN` für den Build verfügbar (Keychain / CI).
-4. Baue. Die generierte Swift-Konfiguration wird in die App kompiliert;
+4. Mache `VAULT_ADDR` + `VAULT_TOKEN` für den Build verfügbar (Keychain / CI).
+5. Baue. Die generierte Swift-Konfiguration wird in die App kompiliert;
    **Promon** verschlüsselt das Bundle nach dem Build.
+
+> **Noch nicht Swift-kompiliert.** `Package.swift` und der Adapter sind ein
+> funktionsfähiger Blueprint, der an die real exportierten Framework-Symbole
+> angebunden ist, aber hier noch nicht mit SwiftPM/Xcode gebaut wurde
+> (zurückgestellt auf den M4-Piloten).
 
 ### CI / Server (eingebetteter JVM-Reader)
 
@@ -327,11 +349,27 @@ pkl-vault-kmp/                 # die Kotlin-Multiplatform-Bibliothek
 │   └─ PklVaultReader.kt       # org.pkl.core.resource.ResourceReader
 ├─ src/nativeMain/kotlin/…     # iOS + macOS
 │   └─ PklVaultBridge.kt       # synchroner Einstieg für den Swift-Adapter
-├─ swift-adapter/              # kleiner Swift-Shim über dem Kotlin/Native-Framework
-│   └─ VaultResourceReader.swift
+├─ swift-adapter/              # SwiftPM-Package um das Kotlin/Native-XCFramework
+│   ├─ Package.swift           # Binary-Target → PklVault.xcframework; pkl-swift-Dep
+│   └─ Sources/PklVaultSwift/
+│       └─ VaultResourceReader.swift
 pkl/de.starfinanz.config/      # gemeinsames Pkl-Package: PklProject, AppConfig.pkl, secrets.pkl
-Jenkinsfile                    # CI: baut JVM-Jar + native Artefakte auf macOS
+Jenkinsfile                    # CI: Build + Test, XCFramework assemblieren, Maven publizieren (auf Tags)
 ```
+
+### Packaging & Publishing
+
+- **JVM / Android (Maven):** `maven-publish` erzeugt die üblichen
+  KMP-Publikationen (`jvm`, `iosArm64`, `iosSimulatorArm64`, `macosArm64` sowie
+  die Multiplatform-Metadaten). Das JVM-Artefakt wird als
+  `de.starfinanz.pkl.vault:pkl-vault-kmp-jvm` konsumiert. Die interne
+  Registry-URL und die Zugangsdaten sind **Platzhalter** (`starfinanzMavenUrl` /
+  `starfinanzMavenUsername` / `starfinanzMavenPassword` als Gradle-Properties),
+  bis die Registry existiert; `publishToMavenLocal` funktioniert heute für Tests.
+- **iOS (XCFramework + SwiftPM):** `assemblePklVaultReleaseXCFramework` baut
+  `PklVault.xcframework`, konsumiert über `swift-adapter/Package.swift`.
+- Die CI assembliert das XCFramework bei jedem Build und publiziert die
+  Maven-Artefakte nur auf Release-Tags (durch Zugangsdaten abgesichert).
 
 ---
 

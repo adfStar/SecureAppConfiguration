@@ -1,6 +1,10 @@
+import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
+    `maven-publish`
 }
 
 group = "de.starfinanz.pkl.vault"
@@ -11,14 +15,21 @@ kotlin {
 
     jvm()
 
-    iosArm64()
-    iosSimulatorArm64()
-    macosArm64()
+    // Single Swift-consumable artifact for iOS. The per-target frameworks are
+    // combined into PklVault.xcframework (device + simulator) for SPM/Xcode;
+    // see swift-adapter/Package.swift. Assemble with `assemblePklVaultXCFramework`.
+    val xcframework = XCFramework("PklVault")
+    listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
+        target.binaries.framework {
+            baseName = "PklVault"
+            isStatic = true
+            xcframework.add(this)
+        }
+    }
 
-    // Export a single Swift-consumable framework from every Apple target. The
-    // Swift adapter (swift-adapter/VaultResourceReader.swift) links against this
-    // to reach PklVaultBridge. iOS/SPM wiring itself lands in M4 (pilots).
-    targets.withType(org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget::class.java).configureEach {
+    // macOS framework kept for local experiments and to run native tests on the
+    // CI host; not part of the iOS XCFramework.
+    macosArm64 {
         binaries.framework {
             baseName = "PklVault"
             isStatic = true
@@ -47,6 +58,27 @@ kotlin {
         }
         nativeMain.dependencies {
             implementation(libs.ktor.client.darwin)
+        }
+    }
+}
+
+// The Kotlin Multiplatform plugin auto-creates the publications (JVM jar, Apple
+// klibs, and the `kotlinMultiplatform` metadata module). We only point them at
+// a repository. The URL is a PLACEHOLDER for the internal Maven registry, which
+// does not exist yet; until it does, `publishToMavenLocal` works for trials.
+publishing {
+    repositories {
+        maven {
+            name = "internal"
+            url = uri(
+                providers.gradleProperty("starfinanzMavenUrl")
+                    .orElse("https://maven.internal.starfinanz.de/repository/pkl-vault"),
+            )
+            // Credentials are supplied by CI (e.g. -PstarfinanzMavenUsername=…).
+            credentials {
+                username = providers.gradleProperty("starfinanzMavenUsername").orNull
+                password = providers.gradleProperty("starfinanzMavenPassword").orNull
+            }
         }
     }
 }
