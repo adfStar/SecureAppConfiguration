@@ -46,8 +46,8 @@ amends "company.config.AppConfig"
 apiBaseUrl = "https://api.example.com"
 database {
   host = "db.internal"
-  // The value is fetched from Vault at build time, not stored here:
-  password = read("vault:secret/data/myapp/db#password").text
+  // Fetched from Vault at build time, pinned to secret version 3:
+  password = secrets.vaultField("secret", "myapp/db", 3, "password")
 }
 ```
 
@@ -81,29 +81,61 @@ generates typed Swift/Kotlin that your app compiles in.
 ```
 vault:<mount>/data/<path>?version=<n>#<field>
       └─ KV v2 mount        │          └─ optional field selector
-                            └─ optional KV v2 version (defaults to latest)
+                            └─ REQUIRED KV v2 version
 ```
 
-- `vault:secret/data/myapp/db#password` → the `password` field of that secret.
-- `vault:secret/data/myapp/db` → the **whole** secret object as JSON.
-- `vault:secret/data/myapp/db?version=3#password` → pins KV v2 **version 3**
-  (omit `?version` to read the latest version).
+- `vault:secret/data/myapp/db?version=3#password` → the `password` field of
+  **version 3** of that secret.
+- `vault:secret/data/myapp/db?version=3` → the **whole** secret object (version 3)
+  as JSON.
 
-The literal `data` segment is required — it mirrors the real Vault KV v2 API
-path, so the URI is a transparent view of the request being made. The optional
-`?version=<n>` likewise mirrors Vault's `?version` query parameter, so you can
-reproduce a build against an exact secret revision.
+Two parts are required:
 
-A helper keeps call sites tidy:
+- The literal `data` segment — it mirrors the real Vault KV v2 API path, so the
+  URI is a transparent view of the request being made.
+- The `?version=<n>` query — **versioning is mandatory** (see
+  [Reproducible builds](#reproducible-builds--secret-versioning)). An unversioned
+  `vault:` URI is rejected at evaluation time, so a build can never silently pick
+  up a newer secret than it shipped with.
+
+Use the typed helper rather than hand-writing URIs — it makes the version
+**impossible to forget**, because Pkl requires the `version` argument:
 
 ```pkl
-// secrets.pkl (library helper)
-function vaultField(mount: String, path: String, key: String): String =
-  read("vault:\(mount)/data/\(path)#\(key)").text
+// secrets.pkl (library helper) — `version` is a required parameter
+function vaultField(mount: String, path: String, version: Int, field: String): String =
+  read("vault:\(mount)/data/\(path)?version=\(version)#\(field)").text
 
 // usage
-password = vaultField("secret", "myapp/db", "password")
+password = vaultField("secret", "myapp/db", 3, "password")
 ```
+
+---
+
+## Reproducible builds & secret versioning
+
+**Why mandatory versioning matters:** apps are long-lived and must be
+rebuildable from any past release — for hotfixes, audits, or store resubmissions.
+If config read "the latest secret," rebuilding last year's app would bake in
+*this year's* secret values, producing an artifact that never existed and may not
+even work. Pinning the KV v2 version makes the build **reproducible**: the secret
+revision is part of the versioned source.
+
+**The discipline:** pin the version in the git-tracked Pkl when you cut a release.
+Then `git checkout <old-tag>` reproduces the app code **and** its exact secret
+versions together — one source of truth, one deterministic result.
+
+**How it is enforced** (no separate static-analysis step required):
+
+1. **Structurally, by Pkl.** The `vaultField` / `vaultSecret` helpers take a
+   required `version: Int`. Pkl will not type-check a call that omits it, so the
+   mistake is caught before anything runs.
+2. **At evaluation time, by the reader.** Even a hand-written raw
+   `read("vault:...")` without `?version=` is **rejected** by the pkl-vault
+   reader during evaluation, failing the build with a clear error.
+
+Together these mean an unversioned secret read simply cannot make it into a
+built artifact.
 
 ---
 
@@ -269,7 +301,9 @@ Jenkinsfile                    # CI: build JVM jar + native artifacts on macOS
 ## Quick start for a new project (summary)
 
 1. Depend on the shared Pkl package `company.config` and write your `app.pkl`.
-2. Reference secrets with `read("vault:<mount>/data/<path>#<field>").text`.
+2. Reference secrets with the typed helper, e.g.
+   `secrets.vaultField("secret", "myapp/db", 3, "password")` — the `version` is
+   required, so builds stay reproducible.
 3. Register the `pkl-vault` reader for your platform (Gradle / SPM / CLI).
 4. Provide `VAULT_ADDR` + `VAULT_TOKEN` in the build environment.
 5. Build — typed config is generated with secrets resolved, and protected at

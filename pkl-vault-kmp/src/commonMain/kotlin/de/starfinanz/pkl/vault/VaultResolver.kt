@@ -38,7 +38,10 @@ public class VaultResolver(
      */
     public suspend fun resolve(rawUri: String): ByteArray {
         val uri = VaultUri.parse(rawUri)
-
+        if (uri.version == null) {
+            // Enforced at evaluation time: no unversioned reads reach Vault.
+            throw VaultVersionRequiredException(rawUri)
+        }
         val (deferred, isOwner) = cacheLock.withLock {
             val existing = cache[rawUri]
             if (existing != null) {

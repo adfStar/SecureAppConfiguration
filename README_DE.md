@@ -48,8 +48,8 @@ amends "company.config.AppConfig"
 apiBaseUrl = "https://api.example.com"
 database {
   host = "db.internal"
-  // Der Wert wird zur Build-Zeit aus Vault geholt, nicht hier gespeichert:
-  password = read("vault:secret/data/myapp/db#password").text
+  // Zur Build-Zeit aus Vault geholt, auf Secret-Version 3 fixiert:
+  password = secrets.vaultField("secret", "myapp/db", 3, "password")
 }
 ```
 
@@ -83,30 +83,66 @@ Pkl generiert daraus typisiertes Swift/Kotlin, das deine App einkompiliert.
 ```
 vault:<mount>/data/<path>?version=<n>#<field>
       └─ KV-v2-Mount       │          └─ optionaler Feld-Selektor
-                           └─ optionale KV-v2-Version (Standard: neueste)
+                           └─ ERFORDERLICHE KV-v2-Version
 ```
 
-- `vault:secret/data/myapp/db#password` → das Feld `password` dieses Secrets.
-- `vault:secret/data/myapp/db` → das **gesamte** Secret-Objekt als JSON.
-- `vault:secret/data/myapp/db?version=3#password` → fixiert KV-v2-**Version 3**
-  (ohne `?version` wird die neueste Version gelesen).
+- `vault:secret/data/myapp/db?version=3#password` → das Feld `password` von
+  **Version 3** dieses Secrets.
+- `vault:secret/data/myapp/db?version=3` → das **gesamte** Secret-Objekt
+  (Version 3) als JSON.
 
-Das wörtliche `data`-Segment ist erforderlich — es spiegelt den echten
-Vault-KV-v2-API-Pfad wider, sodass die URI eine transparente Abbildung der
-tatsächlich ausgeführten Anfrage ist. Das optionale `?version=<n>` spiegelt
-ebenso Vaults `?version`-Query-Parameter wider, sodass sich ein Build gegen eine
-exakte Secret-Revision reproduzieren lässt.
+Zwei Teile sind erforderlich:
 
-Ein Helfer hält die Aufrufstellen übersichtlich:
+- Das wörtliche `data`-Segment — es spiegelt den echten Vault-KV-v2-API-Pfad
+  wider, sodass die URI eine transparente Abbildung der tatsächlich
+  ausgeführten Anfrage ist.
+- Die `?version=<n>`-Query — **Versionierung ist verpflichtend** (siehe
+  [Reproduzierbare Builds](#reproduzierbare-builds--secret-versionierung)). Eine
+  unversionierte `vault:`-URI wird zur Auswertungszeit abgelehnt, sodass ein
+  Build niemals stillschweigend ein neueres Secret übernimmt als das, mit dem er
+  ausgeliefert wurde.
+
+Nutze den typisierten Helfer, statt URIs von Hand zu schreiben — er macht die
+Version **unmöglich zu vergessen**, weil Pkl das `version`-Argument verlangt:
 
 ```pkl
-// secrets.pkl (Bibliotheks-Helfer)
-function vaultField(mount: String, path: String, key: String): String =
-  read("vault:\(mount)/data/\(path)#\(key)").text
+// secrets.pkl (Bibliotheks-Helfer) — `version` ist ein Pflichtparameter
+function vaultField(mount: String, path: String, version: Int, field: String): String =
+  read("vault:\(mount)/data/\(path)?version=\(version)#\(field)").text
 
 // Verwendung
-password = vaultField("secret", "myapp/db", "password")
+password = vaultField("secret", "myapp/db", 3, "password")
 ```
+
+---
+
+## Reproduzierbare Builds & Secret-Versionierung
+
+**Warum verpflichtende Versionierung wichtig ist:** Apps sind langlebig und
+müssen aus jedem früheren Release neu baubar sein — für Hotfixes, Audits oder
+Store-Resubmissions. Würde die Konfiguration „das neueste Secret" lesen, würde
+ein Neubau der letztjährigen App die *diesjährigen* Secret-Werte einbacken und
+ein Artefakt erzeugen, das es nie gab und das womöglich gar nicht funktioniert.
+Das Fixieren der KV-v2-Version macht den Build **reproduzierbar**: Die
+Secret-Revision ist Teil des versionierten Quellcodes.
+
+**Die Disziplin:** Fixiere die Version im Git-versionierten Pkl, wenn du ein
+Release schneidest. Dann reproduziert `git checkout <old-tag>` den App-Code
+**und** seine exakten Secret-Versionen gemeinsam — eine Quelle der Wahrheit, ein
+deterministisches Ergebnis.
+
+**Wie es durchgesetzt wird** (ohne separaten statischen Analyseschritt):
+
+1. **Strukturell, durch Pkl.** Die Helfer `vaultField` / `vaultSecret` erwarten
+   ein verpflichtendes `version: Int`. Pkl type-checkt keinen Aufruf, der es
+   weglässt — der Fehler wird erkannt, bevor überhaupt etwas läuft.
+2. **Zur Auswertungszeit, durch den Reader.** Selbst ein von Hand geschriebenes
+   rohes `read("vault:...")` ohne `?version=` wird vom pkl-vault-Reader während
+   der Auswertung **abgelehnt** und bricht den Build mit einer klaren
+   Fehlermeldung ab.
+
+Zusammen bedeuten sie, dass ein unversionierter Secret-Read schlicht nicht in ein
+gebautes Artefakt gelangen kann.
 
 ---
 
@@ -280,7 +316,9 @@ Jenkinsfile                    # CI: baut JVM-Jar + native Artefakte auf macOS
 ## Schnellstart für ein neues Projekt (Zusammenfassung)
 
 1. Hänge am gemeinsamen Pkl-Package `company.config` und schreibe deine `app.pkl`.
-2. Referenziere Secrets mit `read("vault:<mount>/data/<path>#<field>").text`.
+2. Referenziere Secrets über den typisierten Helfer, z. B.
+   `secrets.vaultField("secret", "myapp/db", 3, "password")` — die `version` ist
+   verpflichtend, sodass Builds reproduzierbar bleiben.
 3. Registriere den `pkl-vault`-Reader für deine Plattform (Gradle / SPM / CLI).
 4. Stelle `VAULT_ADDR` + `VAULT_TOKEN` in der Build-Umgebung bereit.
 5. Baue — typisierte Konfiguration wird mit aufgelösten Secrets generiert und at

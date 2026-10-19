@@ -22,6 +22,16 @@ public class VaultNotFoundException(message: String) : VaultException(message)
 /** The secret exists but the requested field is absent from its data. */
 public class VaultFieldNotFoundException(message: String) : VaultException(message)
 
+/**
+ * A `vault:` URI did not pin a KV v2 version (`?version=<n>`). Unversioned reads
+ * are disallowed so that rebuilding an old app revision resolves the exact
+ * secret revision it shipped with, rather than whatever is latest today.
+ */
+public class VaultVersionRequiredException(raw: String) : VaultException(
+    "Vault URI '$raw' must pin a version with '?version=<n>'; " +
+        "unversioned reads are disallowed to keep builds reproducible",
+)
+
 /** Transport-level failure (DNS, connection, TLS, timeout). */
 public class VaultNetworkException(message: String, cause: Throwable) :
     VaultException(message, cause)
