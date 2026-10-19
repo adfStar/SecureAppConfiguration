@@ -15,6 +15,16 @@ kotlin {
     iosSimulatorArm64()
     macosArm64()
 
+    // Export a single Swift-consumable framework from every Apple target. The
+    // Swift adapter (swift-adapter/VaultResourceReader.swift) links against this
+    // to reach PklVaultBridge. iOS/SPM wiring itself lands in M4 (pilots).
+    targets.withType(org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget::class.java).configureEach {
+        binaries.framework {
+            baseName = "PklVault"
+            isStatic = true
+        }
+    }
+
     // Shares the Vault core across all Apple native targets under src/nativeMain.
     applyDefaultHierarchyTemplate()
 

@@ -73,8 +73,8 @@ Pkl generiert daraus typisiertes Swift/Kotlin, das deine App einkompiliert.
 |---|---|---|
 | Android-Build | Reader auf dem Pkl-Gradle-Task registriert | JVM-Jar |
 | iOS-Build | Swift-Adapter → gemeinsames Kotlin/Native-Framework | iOS-Framework |
-| CI / Server | Eingebettete JVM **oder** externe Reader-Executable | JVM-Jar / Native-Exe |
-| Beliebige `pkl`-CLI | `--external-resource-reader vault=./pkl-vault` | Native-Executable |
+| CI / Server | Eingebetteter JVM-Reader (native External-Reader zurückgestellt) | JVM-Jar |
+| Beliebige `pkl`-CLI | `--external-resource-reader vault=./pkl-vault` | Native-Executable *(zurückgestellt)* |
 
 ---
 
@@ -216,7 +216,7 @@ vault kv get -mount=secret myapp/db          # prüft Pfad + Policy
        register("appConfig") {
          sourceModules.add("src/main/pkl/app.pkl")
          // pkl-vault steuert hier den `vault:`-ResourceReader bei
-         resourceReaders.add(de.starfinanz.pkl.vault.PklVaultReader())
+         resourceReaders.add(de.starfinanz.pkl.vault.PklVaultReader.fromEnvironment())
        }
      }
    }
@@ -246,21 +246,40 @@ vault kv get -mount=secret myapp/db          # prüft Pfad + Policy
 4. Baue. Die generierte Swift-Konfiguration wird in die App kompiliert;
    **Promon** verschlüsselt das Bundle nach dem Build.
 
-### CI / Server (Pkl-CLI, externer Reader)
+### CI / Server (eingebetteter JVM-Reader)
 
-1. Liefere die native External-Reader-Executable (oder das JVM-Jar) mit deiner
-   Pipeline aus.
-2. Werte aus und binde den Reader über das Schema ein:
+Der heute unterstützte CI-Weg ist der **eingebettete JVM-Reader**: Registriere
+`PklVaultReader` auf einem In-Process-Pkl-Evaluator (genau der Pfad, den der
+JVM-Integrationstest ausführt), rendere deine Konfiguration und behandle die
+Ausgabe als flüchtiges Artefakt.
 
-   ```bash
-   pkl eval \
-     --external-resource-reader vault=./pkl-vault \
-     config.pkl --format json --output-path build/config.json
-   ```
+```kotlin
+// render.kts (oder ein kleiner Gradle/JVM-Schritt auf dem CI-Jar)
+import org.pkl.core.EvaluatorBuilder
+import org.pkl.core.ModuleSource
+import java.util.regex.Pattern
+import de.starfinanz.pkl.vault.PklVaultReader
 
-3. CI injiziert ein `VAULT_TOKEN` mit **kurzer TTL**; rendere in ein
-   **flüchtiges** Artefakt, das per `.gitignore` ausgeschlossen und nie in Logs
-   ausgegeben wird.
+PklVaultReader.fromEnvironment().use { reader ->
+  EvaluatorBuilder.preconfigured()
+    .let { it.setAllowedResources(it.allowedResources + Pattern.compile("vault:.*")) }
+    .addResourceReader(reader)
+    .build()
+    .use { evaluator ->
+      val json = evaluator.evaluateOutputText(ModuleSource.path("config.pkl"))
+      java.io.File("build/config.json").writeText(json) // flüchtig, per .gitignore ausgeschlossen
+    }
+}
+```
+
+CI injiziert ein `VAULT_TOKEN` mit **kurzer TTL**; die gerenderte Datei wird per
+`.gitignore` ausgeschlossen und nie in Logs ausgegeben.
+
+> **Die native External-Reader-Executable (`pkl eval --external-resource-reader`)
+> ist zurückgestellt.** Sie erfordert ein handgeschriebenes MessagePack-stdio-
+> Protokoll in Kotlin/Native (keine offizielle SDK) und eine neue Abhängigkeit;
+> bis ein CI-Bedarf entsteht, den der eingebettete JVM-Reader nicht deckt, wird
+> dieser verwendet.
 
 ---
 
@@ -304,9 +323,10 @@ pkl-vault-kmp/                 # die Kotlin-Multiplatform-Bibliothek
 │   └─ Redaction.kt            # loggt niemals Secret-Werte
 ├─ src/jvmMain/kotlin/…        # Android + CI (JVM)
 │   └─ PklVaultReader.kt       # org.pkl.core.resource.ResourceReader
-├─ src/nativeMain/kotlin/…     # iOS + macOS + Linux
-│   └─ ExternalReaderMain.kt   # Pkl-External-Reader-stdio-Protokoll
-swift-adapter/                 # kleiner Swift-Shim über dem Kotlin/Native-Framework
+├─ src/nativeMain/kotlin/…     # iOS + macOS
+│   └─ PklVaultBridge.kt       # synchroner Einstieg für den Swift-Adapter
+├─ swift-adapter/              # kleiner Swift-Shim über dem Kotlin/Native-Framework
+│   └─ VaultResourceReader.swift
 company.config/                # gemeinsames Pkl-Package: AppConfig.pkl, secrets.pkl
 Jenkinsfile                    # CI: baut JVM-Jar + native Artefakte auf macOS
 ```
@@ -334,7 +354,7 @@ Diese README beschreibt den vollständigen Blueprint. Aktueller Stand des Codeba
 |---|---|
 | M0 — KMP-Scaffolding (Gradle, Targets, CI) | ✅ Umgesetzt |
 | M1 — Gemeinsamer Kern (`VaultUri`, `VaultClient`, `VaultResolver`, Redaction) | ✅ Umgesetzt + getestet |
-| M2 — Bindings (JVM-Reader, nativer External-Reader, Swift-Adapter) | ⏳ Geplant |
+| M2 — Bindings (JVM-Reader ✅ getestet; Swift-Adapter + Framework-Export; nativer External-Reader zurückgestellt) | 🟡 Teilweise implementiert |
 | M3 — Gemeinsames `company.config`-Pkl-Package | ⏳ Geplant |
 | M4 — Piloten (iOS, Android, ein CI-Service) | ⏳ Geplant |
 | M5 — Promon-Pipeline + Doku-Härtung | ⏳ Geplant |

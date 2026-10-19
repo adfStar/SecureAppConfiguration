@@ -71,8 +71,8 @@ generates typed Swift/Kotlin that your app compiles in.
 |---|---|---|
 | Android build | Reader registered on the Pkl Gradle task | JVM jar |
 | iOS build | Swift adapter → shared Kotlin/Native framework | iOS framework |
-| CI / server | Embedded JVM **or** external reader executable | JVM jar / native exe |
-| Any `pkl` CLI | `--external-resource-reader vault=./pkl-vault` | native executable |
+| CI / server | Embedded JVM reader (native external reader deferred) | JVM jar |
+| Any `pkl` CLI | `--external-resource-reader vault=./pkl-vault` | native executable *(deferred)* |
 
 ---
 
@@ -208,7 +208,7 @@ vault kv get -mount=secret myapp/db          # confirms the path + policy
        register("appConfig") {
          sourceModules.add("src/main/pkl/app.pkl")
          // pkl-vault contributes the `vault:` ResourceReader here
-         resourceReaders.add(de.starfinanz.pkl.vault.PklVaultReader())
+         resourceReaders.add(de.starfinanz.pkl.vault.PklVaultReader.fromEnvironment())
        }
      }
    }
@@ -236,20 +236,39 @@ vault kv get -mount=secret myapp/db          # confirms the path + policy
 4. Build. Generated Swift config is compiled into the app; **Promon** encrypts
    the bundle post-build.
 
-### CI / server (Pkl CLI, external reader)
+### CI / server (embedded JVM reader)
 
-1. Ship the native external-reader executable (or the JVM jar) with your
-   pipeline.
-2. Evaluate, wiring the reader by scheme:
+The supported CI route today is the **embedded JVM reader**: register
+`PklVaultReader` on an in-process Pkl evaluator (the exact path the JVM
+integration test exercises), render your config, and treat the output as an
+ephemeral artifact.
 
-   ```bash
-   pkl eval \
-     --external-resource-reader vault=./pkl-vault \
-     config.pkl --format json --output-path build/config.json
-   ```
+```kotlin
+// render.kts (or a small Gradle/JVM step on the CI jar)
+import org.pkl.core.EvaluatorBuilder
+import org.pkl.core.ModuleSource
+import java.util.regex.Pattern
+import de.starfinanz.pkl.vault.PklVaultReader
 
-3. CI injects a **short-TTL** `VAULT_TOKEN`; render to an **ephemeral**
-   artifact that is `.gitignore`d and never echoed to logs.
+PklVaultReader.fromEnvironment().use { reader ->
+  EvaluatorBuilder.preconfigured()
+    .let { it.setAllowedResources(it.allowedResources + Pattern.compile("vault:.*")) }
+    .addResourceReader(reader)
+    .build()
+    .use { evaluator ->
+      val json = evaluator.evaluateOutputText(ModuleSource.path("config.pkl"))
+      java.io.File("build/config.json").writeText(json) // ephemeral, .gitignore'd
+    }
+}
+```
+
+CI injects a **short-TTL** `VAULT_TOKEN`; the rendered file is `.gitignore`d and
+never echoed to logs.
+
+> **Native external-reader executable (`pkl eval --external-resource-reader`)
+> is deferred.** It needs a hand-rolled MessagePack stdio protocol in
+> Kotlin/Native (no official SDK) and a new dependency; until there is a CI need
+> it can't meet, CI uses the embedded JVM reader above.
 
 ---
 
@@ -289,9 +308,10 @@ pkl-vault-kmp/                 # the Kotlin Multiplatform library
 │   └─ Redaction.kt            # never log secret values
 ├─ src/jvmMain/kotlin/…        # Android + CI (JVM)
 │   └─ PklVaultReader.kt       # org.pkl.core.resource.ResourceReader
-├─ src/nativeMain/kotlin/…     # iOS + macOS + Linux
-│   └─ ExternalReaderMain.kt   # pkl external-reader stdio protocol
-swift-adapter/                 # tiny Swift shim over the Kotlin/Native framework
+├─ src/nativeMain/kotlin/…     # iOS + macOS
+│   └─ PklVaultBridge.kt       # sync entry point for the Swift adapter
+├─ swift-adapter/              # tiny Swift shim over the Kotlin/Native framework
+│   └─ VaultResourceReader.swift
 company.config/                # shared Pkl package: AppConfig.pkl, secrets.pkl
 Jenkinsfile                    # CI: build JVM jar + native artifacts on macOS
 ```
@@ -319,7 +339,7 @@ This README describes the full blueprint. Current state of the codebase:
 |---|---|
 | M0 — KMP scaffolding (Gradle, targets, CI) | ✅ Implemented |
 | M1 — Shared core (`VaultUri`, `VaultClient`, `VaultResolver`, redaction) | ✅ Implemented + tested |
-| M2 — Bindings (JVM reader, native external reader, Swift adapter) | ⏳ Planned |
+| M2 — Bindings (JVM reader ✅ tested; Swift adapter + framework export; native external reader deferred) | 🟡 Partially implemented |
 | M3 — Shared `company.config` Pkl package | ⏳ Planned |
 | M4 — Pilots (iOS, Android, one CI service) | ⏳ Planned |
 | M5 — Promon pipeline + docs hardening | ⏳ Planned |
