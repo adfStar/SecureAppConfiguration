@@ -1,0 +1,37 @@
+/// Typed application configuration base for StarFinanz projects.
+///
+/// A project writes its own `app.pkl` that `amends` this module, fills in the
+/// non-secret values as plain Pkl, and pulls secret values from Vault through
+/// the [secrets] helpers — e.g.
+/// `password = secrets.vaultField("secret", "myapp/db", 3, "password")`.
+///
+/// This is an illustrative blueprint schema: extend or replace the fields to
+/// match a project's real shape. The point is that config is *typed and
+/// validated* at build time, and secret reads are *version-pinned* by
+/// construction (see [secrets]).
+module de.starfinanz.config.AppConfig
+
+/// A single database connection. Values are typically a mix of plain config
+/// (host/port) and a Vault-sourced secret (password).
+class Database {
+  /// Hostname or address of the database server.
+  host: String(!isEmpty)
+
+  /// TCP port. Defaults to the common PostgreSQL port.
+  port: Int(isBetween(1, 65535)) = 5432
+
+  /// Database user name.
+  user: String(!isEmpty)
+
+  /// Secret, sourced from Vault at build time via `secrets.vaultField(...)`.
+  password: String(!isEmpty)
+}
+
+/// Base URL of the primary backend API, e.g. `https://api.example.com`.
+apiBaseUrl: String(startsWith("https://"))
+
+/// Primary database connection.
+database: Database
+
+/// Optional feature toggles, defaulting to empty.
+featureFlags: Mapping<String, Boolean> = new {}

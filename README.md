@@ -41,11 +41,13 @@ You write ordinary Pkl, and read a secret with a `vault:` URI:
 
 ```pkl
 // app.pkl
-amends "company.config.AppConfig"
+amends "@de.starfinanz.config/AppConfig.pkl"
+import "@de.starfinanz.config/secrets.pkl"
 
 apiBaseUrl = "https://api.example.com"
 database {
   host = "db.internal"
+  user = "app"
   // Fetched from Vault at build time, pinned to secret version 3:
   password = secrets.vaultField("secret", "myapp/db", 3, "password")
 }
@@ -312,7 +314,7 @@ pkl-vault-kmp/                 # the Kotlin Multiplatform library
 │   └─ PklVaultBridge.kt       # sync entry point for the Swift adapter
 ├─ swift-adapter/              # tiny Swift shim over the Kotlin/Native framework
 │   └─ VaultResourceReader.swift
-company.config/                # shared Pkl package: AppConfig.pkl, secrets.pkl
+pkl/de.starfinanz.config/      # shared Pkl package: PklProject, AppConfig.pkl, secrets.pkl
 Jenkinsfile                    # CI: build JVM jar + native artifacts on macOS
 ```
 
@@ -320,7 +322,8 @@ Jenkinsfile                    # CI: build JVM jar + native artifacts on macOS
 
 ## Quick start for a new project (summary)
 
-1. Depend on the shared Pkl package `company.config` and write your `app.pkl`.
+1. Depend on the shared Pkl package `de.starfinanz.config` and write your
+   `app.pkl` that `amends` `AppConfig.pkl`.
 2. Reference secrets with the typed helper, e.g.
    `secrets.vaultField("secret", "myapp/db", 3, "password")` — the `version` is
    required, so builds stay reproducible.
@@ -340,7 +343,7 @@ This README describes the full blueprint. Current state of the codebase:
 | M0 — KMP scaffolding (Gradle, targets, CI) | ✅ Implemented |
 | M1 — Shared core (`VaultUri`, `VaultClient`, `VaultResolver`, redaction) | ✅ Implemented + tested |
 | M2 — Bindings (JVM reader ✅ tested; Swift adapter + framework export; native external reader deferred) | 🟡 Partially implemented |
-| M3 — Shared `company.config` Pkl package | ⏳ Planned |
+| M3 — Shared `de.starfinanz.config` Pkl package (`AppConfig`, `secrets`; `clientSafe` guard deferred; registry publish deferred) | 🟡 Implemented + validated |
 | M4 — Pilots (iOS, Android, one CI service) | ⏳ Planned |
 | M5 — Promon pipeline + docs hardening | ⏳ Planned |
 

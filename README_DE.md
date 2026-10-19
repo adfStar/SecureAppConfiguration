@@ -43,11 +43,13 @@ Du schreibst ganz normales Pkl und liest ein Secret über eine `vault:`-URI:
 
 ```pkl
 // app.pkl
-amends "company.config.AppConfig"
+amends "@de.starfinanz.config/AppConfig.pkl"
+import "@de.starfinanz.config/secrets.pkl"
 
 apiBaseUrl = "https://api.example.com"
 database {
   host = "db.internal"
+  user = "app"
   // Zur Build-Zeit aus Vault geholt, auf Secret-Version 3 fixiert:
   password = secrets.vaultField("secret", "myapp/db", 3, "password")
 }
@@ -327,7 +329,7 @@ pkl-vault-kmp/                 # die Kotlin-Multiplatform-Bibliothek
 │   └─ PklVaultBridge.kt       # synchroner Einstieg für den Swift-Adapter
 ├─ swift-adapter/              # kleiner Swift-Shim über dem Kotlin/Native-Framework
 │   └─ VaultResourceReader.swift
-company.config/                # gemeinsames Pkl-Package: AppConfig.pkl, secrets.pkl
+pkl/de.starfinanz.config/      # gemeinsames Pkl-Package: PklProject, AppConfig.pkl, secrets.pkl
 Jenkinsfile                    # CI: baut JVM-Jar + native Artefakte auf macOS
 ```
 
@@ -335,7 +337,8 @@ Jenkinsfile                    # CI: baut JVM-Jar + native Artefakte auf macOS
 
 ## Schnellstart für ein neues Projekt (Zusammenfassung)
 
-1. Hänge am gemeinsamen Pkl-Package `company.config` und schreibe deine `app.pkl`.
+1. Hänge am gemeinsamen Pkl-Package `de.starfinanz.config` und schreibe deine
+   `app.pkl`, die `AppConfig.pkl` per `amends` erweitert.
 2. Referenziere Secrets über den typisierten Helfer, z. B.
    `secrets.vaultField("secret", "myapp/db", 3, "password")` — die `version` ist
    verpflichtend, sodass Builds reproduzierbar bleiben.
@@ -355,7 +358,7 @@ Diese README beschreibt den vollständigen Blueprint. Aktueller Stand des Codeba
 | M0 — KMP-Scaffolding (Gradle, Targets, CI) | ✅ Umgesetzt |
 | M1 — Gemeinsamer Kern (`VaultUri`, `VaultClient`, `VaultResolver`, Redaction) | ✅ Umgesetzt + getestet |
 | M2 — Bindings (JVM-Reader ✅ getestet; Swift-Adapter + Framework-Export; nativer External-Reader zurückgestellt) | 🟡 Teilweise implementiert |
-| M3 — Gemeinsames `company.config`-Pkl-Package | ⏳ Geplant |
+| M3 — Gemeinsames `de.starfinanz.config`-Pkl-Package (`AppConfig`, `secrets`; `clientSafe`-Guard zurückgestellt; Registry-Publish zurückgestellt) | 🟡 Umgesetzt + validiert |
 | M4 — Piloten (iOS, Android, ein CI-Service) | ⏳ Geplant |
 | M5 — Promon-Pipeline + Doku-Härtung | ⏳ Geplant |
 

@@ -1,0 +1,17 @@
+/// Package metadata for the shared `de.starfinanz.config` Pkl package.
+///
+/// The `baseUri`/`packageZipUrl` below are PLACEHOLDERS for the internal Pkl
+/// package registry, which does not exist yet. Until it does, consuming projects
+/// import these modules by **relative path** (local) rather than by package URI;
+/// publishing to the registry is a later milestone (M4+).
+amends "pkl:Project"
+
+package {
+  name = "de.starfinanz.config"
+  version = "0.1.0"
+  // Placeholder registry location — replace once the internal registry exists.
+  baseUri = "package://pkl.internal.starfinanz.de/de.starfinanz.config"
+  packageZipUrl = "https://pkl.internal.starfinanz.de/de.starfinanz.config/\(version)/de.starfinanz.config@\(version).zip"
+  description = "Typed application configuration with version-pinned Vault secrets."
+  authors { "StarFinanz <pkl@starfinanz.de>" }
+}
