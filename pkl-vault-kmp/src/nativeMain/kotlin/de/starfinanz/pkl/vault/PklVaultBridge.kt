@@ -25,6 +25,7 @@ public class PklVaultBridge private constructor(
      * [VaultVersionRequiredException] for unversioned URIs) — never logs a
      * secret value.
      */
+    @Throws(VaultException::class, kotlin.coroutines.cancellation.CancellationException::class)
     public suspend fun resolve(uri: String): ByteArray = resolver.resolve(uri)
 
     /** Releases the owned HTTP client. */
@@ -38,6 +39,7 @@ public class PklVaultBridge private constructor(
          * with a Darwin HTTP client it owns. Fails closed via [resolveVaultEnv]
          * when configuration is incomplete.
          */
+        @Throws(VaultException::class)
         public fun fromEnvironment(target: VaultTarget = VaultTarget.SERVER): PklVaultBridge {
             val http = HttpClient(Darwin)
             return PklVaultBridge(VaultResolver.fromEnvironment(http, target), http)
