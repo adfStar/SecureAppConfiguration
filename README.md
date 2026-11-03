@@ -231,14 +231,16 @@ vault kv get -mount=secret myapp/db          # confirms the path + policy
    # → pkl-vault-kmp/build/XCFrameworks/release/PklVault.xcframework
    ```
 
-2. Consume the Swift package `swift-adapter/Package.swift`. It contains the
+2. Consume the repository's root Swift package. It contains the
    `PklVaultSwift` adapter library, the reusable `PickelConfigRenderer` library,
    and the `pickel-config-renderer` executable:
 
    ```swift
-   // In your app's Package.swift
    dependencies: [
-     .package(path: "../pkl-vault/pkl-vault-kmp/swift-adapter"),
+     .package(
+       url: "https://github.com/adfStar/SecureAppConfiguration.git",
+       exact: "0.0.2"
+     ),
    ]
    ```
 
@@ -246,7 +248,7 @@ vault kv get -mount=secret myapp/db          # confirms the path + policy
    and one or more project-owned Pkl descriptors:
 
    ```bash
-   swift run --package-path pkl-vault-kmp/swift-adapter -c release \
+   swift run --package-path /path/to/Pickel -c release \
      pickel-config-renderer \
      --source-root /path/to/project \
      --config-path App/Resources/Development/configDev \
@@ -325,6 +327,7 @@ never echoed to logs.
 ## Repository layout
 
 ```
+Package.swift                  # versioned remote Swift package
 pkl-vault-kmp/                 # the Kotlin Multiplatform library
 ├─ src/commonMain/kotlin/…     # portable core
 │   ├─ VaultUri.kt             # parse "vault:secret/data/app#key"
@@ -336,8 +339,7 @@ pkl-vault-kmp/                 # the Kotlin Multiplatform library
 │   └─ PklVaultReader.kt       # org.pkl.core.resource.ResourceReader
 ├─ src/nativeMain/kotlin/…     # iOS + macOS
 │   └─ PklVaultBridge.kt       # sync entry point for the Swift adapter
-├─ swift-adapter/              # SwiftPM package wrapping the Kotlin/Native XCFramework
-│   ├─ Package.swift           # binary target → PklVault.xcframework; pkl-swift dep
+├─ swift-adapter/              # Swift sources wrapped by the root package
 │   ├─ Sources/PklVaultSwift/  # vault: ResourceReader
 │   ├─ Sources/PickelConfigRenderer/
 │   ├─ Sources/PickelConfigRendererCLI/
@@ -357,8 +359,11 @@ Jenkinsfile                    # CI: build + test, assemble XCFramework, publish
   the registry exists; `publishToMavenLocal` works today for trials.
 - **Apple platforms (XCFramework + SwiftPM):**
   `assemblePklVaultReleaseXCFramework` builds iOS device, iOS simulator, and
-  macOS slices. `swift-adapter/Package.swift` provides both the adapter library
-  and reusable renderer executable.
+  macOS slices. The root `Package.swift` provides both the adapter library and
+  reusable renderer executable. Release tags upload
+  `PklVault.xcframework.zip`; the manifest pins its URL and checksum.
+- **Local Pickel development:** build the XCFramework first, then prefix SwiftPM
+  commands with `PICKEL_LOCAL_XCFRAMEWORK=1` to use the local artifact.
 - CI assembles the XCFramework on every build and publishes Maven artifacts only
   on release tags (guarded by credentials).
 

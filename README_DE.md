@@ -241,14 +241,16 @@ vault kv get -mount=secret myapp/db          # prüft Pfad + Policy
    # → pkl-vault-kmp/build/XCFrameworks/release/PklVault.xcframework
    ```
 
-2. Binde das Swift-Package `swift-adapter/Package.swift` ein. Es enthält die
+2. Binde das Swift-Package im Repository-Root ein. Es enthält die
    Adapter-Library `PklVaultSwift`, die wiederverwendbare Library
    `PickelConfigRenderer` und die Executable `pickel-config-renderer`:
 
    ```swift
-   // In der Package.swift deiner App
    dependencies: [
-     .package(path: "../pkl-vault/pkl-vault-kmp/swift-adapter"),
+     .package(
+       url: "https://github.com/adfStar/SecureAppConfiguration.git",
+       exact: "0.0.2"
+     ),
    ]
    ```
 
@@ -256,7 +258,7 @@ vault kv get -mount=secret myapp/db          # prüft Pfad + Policy
    Konfigurationspfad und einem oder mehreren projektseitigen Pkl-Descriptoren:
 
    ```bash
-   swift run --package-path pkl-vault-kmp/swift-adapter -c release \
+   swift run --package-path /pfad/zu/Pickel -c release \
      pickel-config-renderer \
      --source-root /pfad/zum/projekt \
      --config-path App/Resources/Development/configDev \
@@ -340,6 +342,7 @@ CI injiziert ein `VAULT_TOKEN` mit **kurzer TTL**; die gerenderte Datei wird per
 ## Repository-Aufbau
 
 ```
+Package.swift                  # versioniertes Remote-Swift-Package
 pkl-vault-kmp/                 # die Kotlin-Multiplatform-Bibliothek
 ├─ src/commonMain/kotlin/…     # portabler Kern
 │   ├─ VaultUri.kt             # parse "vault:secret/data/app#key"
@@ -351,8 +354,7 @@ pkl-vault-kmp/                 # die Kotlin-Multiplatform-Bibliothek
 │   └─ PklVaultReader.kt       # org.pkl.core.resource.ResourceReader
 ├─ src/nativeMain/kotlin/…     # iOS + macOS
 │   └─ PklVaultBridge.kt       # synchroner Einstieg für den Swift-Adapter
-├─ swift-adapter/              # SwiftPM-Package um das Kotlin/Native-XCFramework
-│   ├─ Package.swift           # Binary-Target → PklVault.xcframework; pkl-swift-Dep
+├─ swift-adapter/              # Swift-Quellen des Root-Packages
 │   ├─ Sources/PklVaultSwift/  # vault:-ResourceReader
 │   ├─ Sources/PickelConfigRenderer/
 │   ├─ Sources/PickelConfigRendererCLI/
@@ -372,8 +374,11 @@ Jenkinsfile                    # CI: Build + Test, XCFramework assemblieren, Mav
   bis die Registry existiert; `publishToMavenLocal` funktioniert heute für Tests.
 - **Apple-Plattformen (XCFramework + SwiftPM):**
   `assemblePklVaultReleaseXCFramework` baut Slices für iOS-Geräte,
-  iOS-Simulatoren und macOS. `swift-adapter/Package.swift` stellt Adapter-Library
-  und wiederverwendbare Renderer-Executable bereit.
+  iOS-Simulatoren und macOS. Das Root-`Package.swift` stellt Adapter-Library und
+  wiederverwendbare Renderer-Executable bereit. Release-Tags veröffentlichen
+  `PklVault.xcframework.zip`; URL und Checksum sind im Manifest fixiert.
+- **Lokale Pickel-Entwicklung:** Baue zuerst das XCFramework und setze für
+  SwiftPM-Aufrufe `PICKEL_LOCAL_XCFRAMEWORK=1`, um das lokale Artefakt zu nutzen.
 - Die CI assembliert das XCFramework bei jedem Build und publiziert die
   Maven-Artefakte nur auf Release-Tags (durch Zugangsdaten abgesichert).
 

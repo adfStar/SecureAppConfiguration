@@ -50,6 +50,7 @@ Split into **portable logic** (shared) and **binding adapters** (thin, per
 platform). All Vault work is pure Kotlin via the multiplatform Ktor client.
 
 ```
+Package.swift                  # remote SwiftPM package + binary release URL
 pkl-vault-kmp/
 ├─ commonMain/                 # portable logic
 │   ├─ VaultUri.kt             # parse "vault:secret/data/app#key"

@@ -25,10 +25,30 @@ pipeline {
         }
 
         stage('Assemble XCFramework') {
-            // PklVault.xcframework (iosArm64 + iosSimulatorArm64) for the Swift
-            // adapter's SwiftPM package (swift-adapter/Package.swift).
+            // PklVault.xcframework for iOS devices, iOS simulators, and macOS.
             steps {
                 sh './gradlew :pkl-vault-kmp:assemblePklVaultReleaseXCFramework --stacktrace'
+            }
+        }
+
+        stage('Test Swift package') {
+            steps {
+                sh 'PICKEL_LOCAL_XCFRAMEWORK=1 swift test'
+            }
+        }
+
+        stage('Package Apple artifact') {
+            steps {
+                sh '''
+                    mkdir -p pkl-vault-kmp/build/releases
+                    rm -f pkl-vault-kmp/build/releases/PklVault.xcframework.zip
+                    ditto -c -k --sequesterRsrc --keepParent \
+                        pkl-vault-kmp/build/XCFrameworks/release/PklVault.xcframework \
+                        pkl-vault-kmp/build/releases/PklVault.xcframework.zip
+                    PICKEL_LOCAL_XCFRAMEWORK=1 swift package compute-checksum \
+                        pkl-vault-kmp/build/releases/PklVault.xcframework.zip \
+                        > pkl-vault-kmp/build/releases/PklVault.xcframework.checksum
+                '''
             }
         }
 
@@ -62,6 +82,11 @@ pipeline {
             archiveArtifacts artifacts: '**/build/libs/*.jar', allowEmptyArchive: true, fingerprint: true
             archiveArtifacts(
                 artifacts: 'pkl-vault-kmp/build/XCFrameworks/release/**',
+                allowEmptyArchive: true,
+                fingerprint: true,
+            )
+            archiveArtifacts(
+                artifacts: 'pkl-vault-kmp/build/releases/**',
                 allowEmptyArchive: true,
                 fingerprint: true,
             )
