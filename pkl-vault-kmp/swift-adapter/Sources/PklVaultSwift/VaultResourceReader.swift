@@ -4,18 +4,9 @@
 // forwarding reads to the shared Kotlin/Native core (`PklVaultBridge`) exposed
 // by the `PklVault` XCFramework built from pkl-vault-kmp.
 //
-// Status: blueprint. The Kotlin side (bridge + framework export) compiles and
-// links today; wiring this file into an SPM/Xcode target and building it on a
-// real iOS toolchain is M4 (pilots). It has NOT been compiled yet.
-//
-// Usage (M4):
-//   let evaluator = try await EvaluatorManager().newEvaluator(
-//       options: .preconfigured.withResourceReader(VaultResourceReader()))
-//   // ...evaluate Pkl that does: read("vault:secret/data/app?version=3#key").text
-
 import Foundation
 import PklSwift
-import PklVault // Kotlin/Native framework (baseName = "PklVault")
+import PklVault
 
 /// Reads `vault:` resources during Pkl evaluation on Apple platforms.
 ///
@@ -29,18 +20,23 @@ public final class VaultResourceReader: ResourceReader, @unchecked Sendable {
 
     private let bridge: PklVaultBridge
 
-    /// Creates a reader backed by the process environment (`VAULT_ADDR` + token,
-    /// or `~/.vault-token` for local builds). Fails closed if unconfigured.
-    public init(bridge: PklVaultBridge = PklVaultBridge.companion.fromEnvironment(target: VaultTarget.server)) {
-        self.bridge = bridge
+    /// Creates a reader backed by the process environment (`VAULT_ADDR` + token).
+    /// Fails closed if the environment is incomplete.
+    public init(target: VaultTarget = .server) throws {
+        bridge = try PklVaultBridge.companion.fromEnvironment(target: target)
     }
 
     /// Non-hierarchical reader: nothing to enumerate.
     public func listElements(uri: URL) async throws -> [PathElement] { [] }
 
     public func read(url: URL) async throws -> [UInt8]? {
-        let bytes = try await bridge.resolve(uri: url.absoluteString)
-        return bytes.toUInt8()
+        do {
+            let bytes = try await bridge.resolve(uri: url.absoluteString)
+            return bytes.toUInt8()
+        } catch {
+            fputs("error: Vault read failed for \(url.absoluteString): \(error.localizedDescription)\n", stderr)
+            throw error
+        }
     }
 
     /// Releases the owned HTTP client once codegen is done.

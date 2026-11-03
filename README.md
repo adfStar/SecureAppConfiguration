@@ -95,6 +95,8 @@ Two parts are required:
 
 - The literal `data` segment — it mirrors the real Vault KV v2 API path, so the
   URI is a transparent view of the request being made.
+- The mount may contain multiple path segments, for example
+  `vault:organization/project/data/myapp/db?version=3#password`.
 - The `?version=<n>` query — **versioning is mandatory** (see
   [Reproducible builds](#reproducible-builds--secret-versioning)). An unversioned
   `vault:` URI is rejected at evaluation time, so a build can never silently pick
@@ -229,9 +231,9 @@ vault kv get -mount=secret myapp/db          # confirms the path + policy
    # → pkl-vault-kmp/build/XCFrameworks/release/PklVault.xcframework
    ```
 
-2. Consume the Swift adapter package `swift-adapter/Package.swift`. It declares a
-   binary target pointing at `PklVault.xcframework` and depends on
-   [`pkl-swift`](https://github.com/apple/pkl-swift) `0.10.0`:
+2. Consume the Swift package `swift-adapter/Package.swift`. It contains the
+   `PklVaultSwift` adapter library, the reusable `PickelConfigRenderer` library,
+   and the `pickel-config-renderer` executable:
 
    ```swift
    // In your app's Package.swift
@@ -240,23 +242,25 @@ vault kv get -mount=secret myapp/db          # confirms the path + policy
    ]
    ```
 
-3. Register the Swift adapter on the evaluator used for codegen:
+3. Run the generic renderer with the project root, active configuration path,
+   and one or more project-owned Pkl descriptors:
 
-   ```swift
-   import PklVaultSwift   // thin Swift shim over the shared Kotlin/Native framework
-
-   let evaluator = try EvaluatorManager().newEvaluator(
-     options: .preconfigured.withResourceReader(VaultResourceReader())
-   )
+   ```bash
+   swift run --package-path pkl-vault-kmp/swift-adapter -c release \
+     pickel-config-renderer \
+     --source-root /path/to/project \
+     --config-path App/Resources/Development/configDev \
+     --descriptor Configuration/Pkl/App.pkl
    ```
 
 4. Expose `VAULT_ADDR` + `VAULT_TOKEN` to the build (Keychain / CI).
-5. Build. Generated Swift config is compiled into the app; **Promon** encrypts
-   the bundle post-build.
+5. Build. The rendered configuration is consumed by the app; **Promon**
+   encrypts the bundle post-build.
 
-> **Not yet Swift-compiled.** `Package.swift` and the adapter are a working
-> blueprint wired to the real exported framework symbols, but they have not been
-> built with SwiftPM/Xcode here (deferred to the M4 pilot).
+The descriptor exposes a generic `configurations` list. Each entry selects the
+non-secret and secure Pkl modules/members, Vault path, and optional output or
+version-file overrides. The Swift package and the iOS/macOS XCFramework are
+compiled and exercised by the pushTAN M4 pilot.
 
 ### CI / server (embedded JVM reader)
 
@@ -334,8 +338,10 @@ pkl-vault-kmp/                 # the Kotlin Multiplatform library
 │   └─ PklVaultBridge.kt       # sync entry point for the Swift adapter
 ├─ swift-adapter/              # SwiftPM package wrapping the Kotlin/Native XCFramework
 │   ├─ Package.swift           # binary target → PklVault.xcframework; pkl-swift dep
-│   └─ Sources/PklVaultSwift/
-│       └─ VaultResourceReader.swift
+│   ├─ Sources/PklVaultSwift/  # vault: ResourceReader
+│   ├─ Sources/PickelConfigRenderer/
+│   ├─ Sources/PickelConfigRendererCLI/
+│   └─ Tests/PickelConfigRendererTests/
 pkl/de.starfinanz.config/      # shared Pkl package: PklProject, AppConfig.pkl, secrets.pkl
 Jenkinsfile                    # CI: build + test, assemble XCFramework, publish Maven (on tags)
 ```
@@ -349,8 +355,10 @@ Jenkinsfile                    # CI: build + test, assemble XCFramework, publish
   credentials are **placeholders** (`starfinanzMavenUrl` /
   `starfinanzMavenUsername` / `starfinanzMavenPassword` Gradle properties) until
   the registry exists; `publishToMavenLocal` works today for trials.
-- **iOS (XCFramework + SwiftPM):** `assemblePklVaultReleaseXCFramework` builds
-  `PklVault.xcframework`, consumed via `swift-adapter/Package.swift`.
+- **Apple platforms (XCFramework + SwiftPM):**
+  `assemblePklVaultReleaseXCFramework` builds iOS device, iOS simulator, and
+  macOS slices. `swift-adapter/Package.swift` provides both the adapter library
+  and reusable renderer executable.
 - CI assembles the XCFramework on every build and publishes Maven artifacts only
   on release tags (guarded by credentials).
 
@@ -363,7 +371,8 @@ Jenkinsfile                    # CI: build + test, assemble XCFramework, publish
 2. Reference secrets with the typed helper, e.g.
    `secrets.vaultField("secret", "myapp/db", 3, "password")` — the `version` is
    required, so builds stay reproducible.
-3. Register the `pkl-vault` reader for your platform (Gradle / SPM / CLI).
+3. Register the `pkl-vault` reader for your platform, or invoke
+   `pickel-config-renderer` with your project-owned descriptor.
 4. Provide `VAULT_ADDR` + `VAULT_TOKEN` in the build environment.
 5. Build — typed config is generated with secrets resolved, and protected at
    rest by Promon (mobile) or treated as ephemeral (server).
@@ -378,14 +387,14 @@ This README describes the full blueprint. Current state of the codebase:
 |---|---|
 | M0 — KMP scaffolding (Gradle, targets, CI) | ✅ Implemented |
 | M1 — Shared core (`VaultUri`, `VaultClient`, `VaultResolver`, redaction) | ✅ Implemented + tested |
-| M2 — Bindings (JVM reader ✅ tested; Swift adapter + framework export; native external reader deferred) | 🟡 Partially implemented |
+| M2 — Bindings (JVM reader and Swift adapter/framework tested; native external reader deferred) | ✅ Implemented for JVM + Apple |
 | M3 — Shared `de.starfinanz.config` Pkl package (`AppConfig`, `secrets`; `clientSafe` guard deferred; registry publish deferred) | 🟡 Implemented + validated |
-| M4 — Pilots (iOS, Android, one CI service) | ⏳ Planned |
+| M4 — Pilots (pushTAN iOS ✅; Android and CI service pending) | 🟡 In progress |
 | M5 — Promon pipeline + docs hardening | ⏳ Planned |
 
-The core that talks to Vault (parse, fetch, cache, fail-closed, redact) is built
-and tested on JVM, macOS and iOS targets. The platform wiring in the usage
-recipes above is the next milestone.
+The core and Apple renderer package are built and tested on JVM, macOS and iOS
+targets. The remaining pilot work is Android and a CI service, followed by
+publishing versioned artifacts instead of consuming a sibling checkout.
 
 ---
 

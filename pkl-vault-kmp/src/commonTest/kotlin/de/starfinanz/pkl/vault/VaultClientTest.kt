@@ -47,6 +47,21 @@ class VaultClientTest {
     }
 
     @Test
+    fun targets_kv_v2_path_for_nested_mount() = runTest {
+        var seenPath: String? = null
+        val http = client { request ->
+            seenPath = request.url.encodedPath
+            respond(KV_V2_BODY, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+
+        VaultClient(http, env).read(
+            VaultUri.parse("vault:org/project/data/myapp/db#password"),
+        )
+
+        assertEquals("/v1/org/project/data/myapp/db", seenPath)
+    }
+
+    @Test
     fun omits_namespace_header_when_absent() = runTest {
         var seenNamespace: String? = "unset"
         val http = client { request ->

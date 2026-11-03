@@ -15,9 +15,9 @@ kotlin {
 
     jvm()
 
-    // Single Swift-consumable artifact for iOS. The per-target frameworks are
-    // combined into PklVault.xcframework (device + simulator) for SPM/Xcode;
-    // see swift-adapter/Package.swift. Assemble with `assemblePklVaultXCFramework`.
+    // Single Swift-consumable artifact for Apple platforms. The per-target
+    // frameworks are combined into PklVault.xcframework for SPM/Xcode; see
+    // swift-adapter/Package.swift.
     val xcframework = XCFramework("PklVault")
     listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
         target.binaries.framework {
@@ -27,12 +27,11 @@ kotlin {
         }
     }
 
-    // macOS framework kept for local experiments and to run native tests on the
-    // CI host; not part of the iOS XCFramework.
     macosArm64 {
         binaries.framework {
             baseName = "PklVault"
             isStatic = true
+            xcframework.add(this)
         }
     }
 

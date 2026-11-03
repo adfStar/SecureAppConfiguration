@@ -98,6 +98,8 @@ Zwei Teile sind erforderlich:
 - Das wörtliche `data`-Segment — es spiegelt den echten Vault-KV-v2-API-Pfad
   wider, sodass die URI eine transparente Abbildung der tatsächlich
   ausgeführten Anfrage ist.
+- Der Mount darf aus mehreren Pfadsegmenten bestehen, zum Beispiel
+  `vault:organization/project/data/myapp/db?version=3#password`.
 - Die `?version=<n>`-Query — **Versionierung ist verpflichtend** (siehe
   [Reproduzierbare Builds](#reproduzierbare-builds--secret-versionierung)). Eine
   unversionierte `vault:`-URI wird zur Auswertungszeit abgelehnt, sodass ein
@@ -239,9 +241,9 @@ vault kv get -mount=secret myapp/db          # prüft Pfad + Policy
    # → pkl-vault-kmp/build/XCFrameworks/release/PklVault.xcframework
    ```
 
-2. Binde das Swift-Adapter-Package `swift-adapter/Package.swift` ein. Es
-   deklariert ein Binary-Target, das auf `PklVault.xcframework` zeigt, und hängt
-   von [`pkl-swift`](https://github.com/apple/pkl-swift) `0.10.0` ab:
+2. Binde das Swift-Package `swift-adapter/Package.swift` ein. Es enthält die
+   Adapter-Library `PklVaultSwift`, die wiederverwendbare Library
+   `PickelConfigRenderer` und die Executable `pickel-config-renderer`:
 
    ```swift
    // In der Package.swift deiner App
@@ -250,25 +252,25 @@ vault kv get -mount=secret myapp/db          # prüft Pfad + Policy
    ]
    ```
 
-3. Registriere den Swift-Adapter auf dem für die Codegenerierung genutzten
-   Evaluator:
+3. Starte den generischen Renderer mit Projektwurzel, aktivem
+   Konfigurationspfad und einem oder mehreren projektseitigen Pkl-Descriptoren:
 
-   ```swift
-   import PklVaultSwift   // dünner Swift-Shim über dem gemeinsamen Kotlin/Native-Framework
-
-   let evaluator = try EvaluatorManager().newEvaluator(
-     options: .preconfigured.withResourceReader(VaultResourceReader())
-   )
+   ```bash
+   swift run --package-path pkl-vault-kmp/swift-adapter -c release \
+     pickel-config-renderer \
+     --source-root /pfad/zum/projekt \
+     --config-path App/Resources/Development/configDev \
+     --descriptor Configuration/Pkl/App.pkl
    ```
 
 4. Mache `VAULT_ADDR` + `VAULT_TOKEN` für den Build verfügbar (Keychain / CI).
-5. Baue. Die generierte Swift-Konfiguration wird in die App kompiliert;
+5. Baue. Die gerenderte Konfiguration wird von der App konsumiert;
    **Promon** verschlüsselt das Bundle nach dem Build.
 
-> **Noch nicht Swift-kompiliert.** `Package.swift` und der Adapter sind ein
-> funktionsfähiger Blueprint, der an die real exportierten Framework-Symbole
-> angebunden ist, aber hier noch nicht mit SwiftPM/Xcode gebaut wurde
-> (zurückgestellt auf den M4-Piloten).
+Der Descriptor stellt eine generische `configurations`-Liste bereit. Jeder
+Eintrag wählt die nicht geheime und sichere Pkl-Quelle, den Vault-Pfad sowie
+optionale Overrides für Ausgabe- oder Versionsdateien. Swift-Package und
+iOS/macOS-XCFramework werden im pushTAN-M4-Piloten kompiliert und verwendet.
 
 ### CI / Server (eingebetteter JVM-Reader)
 
@@ -351,8 +353,10 @@ pkl-vault-kmp/                 # die Kotlin-Multiplatform-Bibliothek
 │   └─ PklVaultBridge.kt       # synchroner Einstieg für den Swift-Adapter
 ├─ swift-adapter/              # SwiftPM-Package um das Kotlin/Native-XCFramework
 │   ├─ Package.swift           # Binary-Target → PklVault.xcframework; pkl-swift-Dep
-│   └─ Sources/PklVaultSwift/
-│       └─ VaultResourceReader.swift
+│   ├─ Sources/PklVaultSwift/  # vault:-ResourceReader
+│   ├─ Sources/PickelConfigRenderer/
+│   ├─ Sources/PickelConfigRendererCLI/
+│   └─ Tests/PickelConfigRendererTests/
 pkl/de.starfinanz.config/      # gemeinsames Pkl-Package: PklProject, AppConfig.pkl, secrets.pkl
 Jenkinsfile                    # CI: Build + Test, XCFramework assemblieren, Maven publizieren (auf Tags)
 ```
@@ -366,8 +370,10 @@ Jenkinsfile                    # CI: Build + Test, XCFramework assemblieren, Mav
   Registry-URL und die Zugangsdaten sind **Platzhalter** (`starfinanzMavenUrl` /
   `starfinanzMavenUsername` / `starfinanzMavenPassword` als Gradle-Properties),
   bis die Registry existiert; `publishToMavenLocal` funktioniert heute für Tests.
-- **iOS (XCFramework + SwiftPM):** `assemblePklVaultReleaseXCFramework` baut
-  `PklVault.xcframework`, konsumiert über `swift-adapter/Package.swift`.
+- **Apple-Plattformen (XCFramework + SwiftPM):**
+  `assemblePklVaultReleaseXCFramework` baut Slices für iOS-Geräte,
+  iOS-Simulatoren und macOS. `swift-adapter/Package.swift` stellt Adapter-Library
+  und wiederverwendbare Renderer-Executable bereit.
 - Die CI assembliert das XCFramework bei jedem Build und publiziert die
   Maven-Artefakte nur auf Release-Tags (durch Zugangsdaten abgesichert).
 
@@ -380,7 +386,8 @@ Jenkinsfile                    # CI: Build + Test, XCFramework assemblieren, Mav
 2. Referenziere Secrets über den typisierten Helfer, z. B.
    `secrets.vaultField("secret", "myapp/db", 3, "password")` — die `version` ist
    verpflichtend, sodass Builds reproduzierbar bleiben.
-3. Registriere den `pkl-vault`-Reader für deine Plattform (Gradle / SPM / CLI).
+3. Registriere den `pkl-vault`-Reader für deine Plattform oder rufe
+   `pickel-config-renderer` mit deinem projektseitigen Descriptor auf.
 4. Stelle `VAULT_ADDR` + `VAULT_TOKEN` in der Build-Umgebung bereit.
 5. Baue — typisierte Konfiguration wird mit aufgelösten Secrets generiert und at
    rest durch Promon (Mobile) geschützt bzw. als flüchtig behandelt (Server).
@@ -395,14 +402,15 @@ Diese README beschreibt den vollständigen Blueprint. Aktueller Stand des Codeba
 |---|---|
 | M0 — KMP-Scaffolding (Gradle, Targets, CI) | ✅ Umgesetzt |
 | M1 — Gemeinsamer Kern (`VaultUri`, `VaultClient`, `VaultResolver`, Redaction) | ✅ Umgesetzt + getestet |
-| M2 — Bindings (JVM-Reader ✅ getestet; Swift-Adapter + Framework-Export; nativer External-Reader zurückgestellt) | 🟡 Teilweise implementiert |
+| M2 — Bindings (JVM-Reader und Swift-Adapter/Framework getestet; nativer External-Reader zurückgestellt) | ✅ Für JVM + Apple umgesetzt |
 | M3 — Gemeinsames `de.starfinanz.config`-Pkl-Package (`AppConfig`, `secrets`; `clientSafe`-Guard zurückgestellt; Registry-Publish zurückgestellt) | 🟡 Umgesetzt + validiert |
-| M4 — Piloten (iOS, Android, ein CI-Service) | ⏳ Geplant |
+| M4 — Piloten (pushTAN iOS ✅; Android und CI-Service offen) | 🟡 In Arbeit |
 | M5 — Promon-Pipeline + Doku-Härtung | ⏳ Geplant |
 
-Der Kern, der mit Vault spricht (parsen, holen, cachen, fail-closed, redacten),
-ist gebaut und auf JVM-, macOS- und iOS-Targets getestet. Die Plattform-Verdrahtung
-in den obigen Verwendungs-Rezepten ist der nächste Meilenstein.
+Kern und Apple-Renderer-Package sind für JVM-, macOS- und iOS-Targets gebaut und
+getestet. Offen sind die Android- und CI-Piloten sowie anschließend die
+Veröffentlichung versionierter Artefakte statt eines lokalen
+Sibling-Checkouts.
 
 ---
 

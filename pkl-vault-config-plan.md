@@ -60,8 +60,10 @@ pkl-vault-kmp/
 │   └─ PklVaultReader.kt       # implements org.pkl.core.resource.ResourceReader
 ├─ nativeMain/                 # macosArm64/x64, linuxX64, ios*
 │   └─ ExternalReaderMain.kt   # pkl external-reader stdio message-protocol entry
-├─ swift-adapter/              # tiny Swift shim conforming to pkl-swift ResourceReader
-│   └─ VaultResourceReader.swift
+├─ swift-adapter/              # SwiftPM adapter + reusable renderer
+│   ├─ PklVaultSwift/          # pkl-swift ResourceReader
+│   ├─ PickelConfigRenderer/   # generic descriptor-driven rendering library
+│   └─ PickelConfigRendererCLI/# pickel-config-renderer executable
 └─ build.gradle.kts            # KMP targets + Ktor engines (JVM, Darwin, Native)
 ```
 
@@ -109,6 +111,9 @@ password = read("vault:secret/data/myapp/db#password").text
 - **VaultResourceReader.swift**: conforms to pkl-swift's `ResourceReader`
   protocol; forwards `read(url:)` to the shared Kotlin/Native `VaultResolver`
   exposed through the iOS framework. Wired into the SPM/Xcode build step.
+- **PickelConfigRenderer**: renders non-secret and Vault-backed JSON from a
+  generic project-owned descriptor list, including CHANGELOG-pinned versions
+  and optional output/version-file overrides.
 
 ### 4.5 Shared Pkl package `company.config`
 - `AppConfig.pkl` (typed schema), `secrets.pkl` (helpers like `vaultField`),
@@ -173,13 +178,15 @@ function vaultField(mount: String, path: String, key: String): String =
 **M2 — Bindings**
 - [ ] JVM `PklVaultReader` + integration test with pkl-config-kotlin.
 - [ ] Native `ExternalReaderMain` + test against `pkl eval`.
-- [ ] Swift adapter conforming to pkl-swift `ResourceReader`.
+- [x] Swift adapter conforming to pkl-swift `ResourceReader`.
+- [x] Apple XCFramework with iOS device, iOS simulator, and macOS slices.
+- [x] Generic SwiftPM renderer library, CLI, and focused tests.
 
 **M3 — Pkl package**
 - [ ] `company.config` (`AppConfig`, `secrets.pkl`, guard); publish to registry.
 
 **M4 — Pilots**
-- [ ] iOS app (this pushTAN project) via SPM build plugin.
+- [x] iOS app (pushTAN) via the Pickel SwiftPM renderer executable.
 - [ ] One Android app via pkl-gradle.
 - [ ] One CI service via external reader.
 

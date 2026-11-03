@@ -77,6 +77,19 @@ class VaultUriTest {
     }
 
     @Test
+    fun nested_mount_is_preserved() {
+        val uri = VaultUri.parse(
+            "vault:.ORG.App_Factory.Entwicklung-iOS/.Projekt.pushTAN/data/S-pushTAN/configDev#password",
+        )
+        assertEquals(".ORG.App_Factory.Entwicklung-iOS/.Projekt.pushTAN", uri.mount)
+        assertEquals("S-pushTAN/configDev", uri.path)
+        assertEquals(
+            ".ORG.App_Factory.Entwicklung-iOS/.Projekt.pushTAN/data/S-pushTAN/configDev",
+            uri.apiPath(),
+        )
+    }
+
+    @Test
     fun api_path_percent_encodes_segments() {
         val uri = VaultUri.parse("vault:secret/data/my app/db#password")
         assertEquals("secret/data/my%20app/db", uri.apiPath())
@@ -105,6 +118,11 @@ class VaultUriTest {
     @Test
     fun rejects_empty_mount() {
         assertFailsWith<VaultUriException> { VaultUri.parse("vault:/data/app#x") }
+    }
+
+    @Test
+    fun rejects_empty_nested_mount_segment() {
+        assertFailsWith<VaultUriException> { VaultUri.parse("vault:secret//nested/data/app#x") }
     }
 
     @Test

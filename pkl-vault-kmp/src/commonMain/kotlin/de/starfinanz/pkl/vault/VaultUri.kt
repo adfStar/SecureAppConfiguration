@@ -15,7 +15,8 @@ public class VaultUriException(
 /**
  * A parsed, validated `vault:` resource URI.
  *
- * Shape: `vault:<mount>/data/<path>#<field>`
+ * Shape: `vault:<mount>/data/<path>#<field>`, where `<mount>` may contain
+ * multiple path segments.
  *
  * The literal `data` segment is required and reflects the Vault KV v2 API path
  * (`<mount>/data/<path>`); keeping it explicit makes the URI a transparent view
@@ -40,8 +41,9 @@ public data class VaultUri(
      * not alter the request.
      */
     public fun apiPath(): String {
+        val encodedMount = mount.split('/').joinToString("/") { it.encodeURLPathPart() }
         val encodedPath = path.split('/').joinToString("/") { it.encodeURLPathPart() }
-        return "${mount.encodeURLPathPart()}/data/$encodedPath"
+        return "$encodedMount/data/$encodedPath"
     }
 
     public companion object {
@@ -103,20 +105,25 @@ public data class VaultUri(
                     "expected '<mount>/$DATA_SEGMENT/<path>' but got too few segments",
                 )
             }
-            val mount = segments[0]
-            if (mount.isEmpty()) {
-                throw VaultUriException(raw, "mount (first segment) must not be empty")
-            }
-            if (segments[1] != DATA_SEGMENT) {
+            val dataIndex = segments.indexOf(DATA_SEGMENT)
+            if (dataIndex <= 0) {
                 throw VaultUriException(
                     raw,
-                    "second segment must be '$DATA_SEGMENT' (KV v2); got '${segments[1]}'",
+                    "expected a non-empty mount followed by the '$DATA_SEGMENT' KV v2 segment",
                 )
             }
-            val pathSegments = segments.drop(2)
+            val mountSegments = segments.take(dataIndex)
+            if (mountSegments.any { it.isEmpty() }) {
+                throw VaultUriException(raw, "mount segments must not be empty")
+            }
+            val pathSegments = segments.drop(dataIndex + 1)
+            if (pathSegments.isEmpty()) {
+                throw VaultUriException(raw, "path after '$DATA_SEGMENT' must not be empty")
+            }
             if (pathSegments.any { it.isEmpty() }) {
                 throw VaultUriException(raw, "path segments must not be empty")
             }
+            val mount = mountSegments.joinToString("/")
             val path = pathSegments.joinToString("/")
 
             return VaultUri(mount = mount, path = path, field = field, version = version, raw = raw)
